@@ -1051,6 +1051,8 @@ function onAddClick(e: MouseEvent) {
 let chatMenu: HTMLDivElement | null = null;
 let chatMenuGif: SavedGif | null = null;
 let chatMenuNewInput = false;
+let chatMenuRenameId: string | null = null;
+let chatMenuDeleteId: string | null = null;
 
 function isGifUrl(url: string) {
     return /\.gif([?#]|$)/i.test(url) || /format=gif/i.test(url) || /animated=true/i.test(url);
@@ -1315,6 +1317,8 @@ function injectPickerPlusButtons() {
 function openChatMenu(gif: SavedGif, anchor: HTMLElement) {
     chatMenuGif = gif;
     chatMenuNewInput = false;
+    chatMenuRenameId = null;
+    chatMenuDeleteId = null;
 
     if (!chatMenu) {
         chatMenu = el("div", "sg-popup sg-chat-menu sg-ui") as HTMLDivElement;
@@ -1351,6 +1355,8 @@ function closeChatMenu() {
     chatMenu.style.display = "none";
     chatMenuGif = null;
     chatMenuNewInput = false;
+    chatMenuRenameId = null;
+    chatMenuDeleteId = null;
 }
 
 function renderChatMenu() {
@@ -1358,6 +1364,56 @@ function renderChatMenu() {
     chatMenu.innerHTML = "";
 
     for (const cat of categories) {
+        if (chatMenuRenameId === cat.id) {
+            const row = el("div", "sg-new");
+            const input = el("input", "sg-input") as HTMLInputElement;
+            input.value = cat.name;
+            input.maxLength = 40;
+
+            const commit = () => {
+                const value = input.value.trim();
+                if (value) renameCategory(cat.id, value);
+                chatMenuRenameId = null;
+                renderChatMenu();
+            };
+
+            input.addEventListener("keydown", e => {
+                e.stopPropagation();
+                if (e.key === "Enter") commit();
+                if (e.key === "Escape") { chatMenuRenameId = null; renderChatMenu(); }
+            });
+
+            const ok = el("button", "sg-btn", "OK") as HTMLButtonElement;
+            ok.addEventListener("click", commit);
+
+            row.append(input, ok);
+            chatMenu.appendChild(row);
+            requestAnimationFrame(() => { input.focus(); input.select(); });
+            continue;
+        }
+
+        if (chatMenuDeleteId === cat.id) {
+            const row = el("div", "sg-row");
+            const text = el("span", "sg-row-name", `Delete “${cat.name}”?`);
+            const yes = el("button", "sg-btn", "Yes") as HTMLButtonElement;
+            const no = el("button", "sg-btn sg-plain", "No") as HTMLButtonElement;
+            yes.style.background = "var(--status-danger, #da373c)";
+            yes.addEventListener("click", e => {
+                e.stopPropagation();
+                chatMenuDeleteId = null;
+                deleteCategory(cat.id);
+                renderChatMenu();
+            });
+            no.addEventListener("click", e => {
+                e.stopPropagation();
+                chatMenuDeleteId = null;
+                renderChatMenu();
+            });
+            row.append(text, yes, no);
+            chatMenu.appendChild(row);
+            continue;
+        }
+
         const row = el("div", "sg-row");
         row.append(
             el("span", "sg-row-name", cat.id === FAV_ID ? `★ ${cat.name}` : cat.name),
@@ -1370,6 +1426,25 @@ function renderChatMenu() {
             closeChatMenu();
         });
 
+        const edit = el("button", "sg-x sg-edit", "✎") as HTMLButtonElement;
+        edit.title = `Rename “${cat.name}”`;
+        edit.addEventListener("click", e => {
+            e.stopPropagation();
+            chatMenuRenameId = cat.id;
+            chatMenuDeleteId = null;
+            renderChatMenu();
+        });
+
+        const del = el("button", "sg-x", "✕") as HTMLButtonElement;
+        del.title = `Delete “${cat.name}”`;
+        del.addEventListener("click", e => {
+            e.stopPropagation();
+            chatMenuDeleteId = cat.id;
+            chatMenuRenameId = null;
+            renderChatMenu();
+        });
+
+        row.append(edit, del);
         chatMenu.appendChild(row);
     }
 
