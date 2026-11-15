@@ -1,4 +1,4 @@
- # 100% VIBECODED!!!
+﻿ # 100% VIBECODED!!!
  # Big GIF & Emoji Panel for Discord + Super GIFs
 
 Makes the standard GIF / emoji / sticker panel large and resizable, and adds
@@ -35,6 +35,11 @@ It takes about **3–5 minutes**. When you see **“Done!”**, you're all set.
 > If Windows shows the blue “Windows protected your PC” window —
 > click **More info** → **Run anyway**.
 
+## Updating
+
+- **Desktop:** run `git pull` in this folder, then run `Install.bat` again. If the folder is a git clone, the installer also tries `git pull --ff-only` automatically.
+- **Browser:** run `git pull`, then reinstall the extension from the updated `browser` folder (or rebuild it with `browser/build-browser.ps1`).
+
 ---
 
 ## How to use
@@ -67,7 +72,18 @@ It takes about **3–5 minutes**. When you see **“Done!”**, you're all set.
 - Discord's own favorite star sits on the left and our **+** on the right, so they never overlap.
 - Show/hide standard categories: Settings → **Vencord** → **Plugins** → **SuperGifs**.
 
+## Browser (Vencord Web)
+
+Prebuilt browser builds are in the `browser` folder:
+
+- `browser/extension-chrome.zip` — Chrome / Edge / Opera
+- `browser/extension-firefox.zip` — Firefox
+- `browser/Vencord.user.js` — Tampermonkey / Violentmonkey
+
+Installation and caveats: see `browser/README.md`.
+
 ---
+
 ## Troubleshooting
 
 **The panel disappeared after a Discord update**
@@ -84,6 +100,7 @@ It takes about **3–5 minutes**. When you see **“Done!”**, you're all set.
 ## Important
 
 - Do **not** delete or move the folder `C:\Users\YOUR_NAME\AppData\Local\Vencord` — Discord loads the mod from it.
+- Keep the `plugins` folder next to `Install.bat` — the installer takes the plugin sources from it.
   If you deleted it, just run `Install.bat` again.
 - This is an unofficial mod. Discord does not ban for it, but use it at your own risk.
 
