@@ -102,7 +102,7 @@ Installation and caveats: see `browser/README.md`.
 - Do **not** delete or move the folder `C:\Users\YOUR_NAME\AppData\Local\Vencord` — Discord loads the mod from it.
 - Keep the `plugins` folder next to `Install.bat` — the installer takes the plugin sources from it.
   If you deleted it, just run `Install.bat` again.
-- This is an unofficial mod. Discord does not ban for it, but use it at your own risk.
+- This is an unofficial mod. Discord often doesn't ban for it, but use it at your own risk.
 
 ---
 
