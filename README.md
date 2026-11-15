@@ -1,4 +1,5 @@
-﻿# Big GIF & Emoji Panel for Discord + Super GIFs
+ # 100% VIBECODED!!!
+ # Big GIF & Emoji Panel for Discord + Super GIFs
 
 Makes the standard GIF / emoji / sticker panel large and resizable, and adds
 **Super GIFs** — your own favorites and custom GIF categories.
