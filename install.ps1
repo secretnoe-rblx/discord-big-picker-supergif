@@ -577,7 +577,22 @@ const CSS = `
     background: linear-gradient(180deg, rgba(0,0,0,.1) 35%, rgba(0,0,0,.6));
     pointer-events: none;
 }
-.sg-cat-tile:hover { outline: 2px solid var(--brand-experiment, #5865f2); outline-offset: -2px; }
+.sg-cat-tile:hover { outline: none; }
+.sg-cat-tile::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    border: 2px solid transparent;
+    border-radius: inherit;
+    pointer-events: none;
+    box-sizing: border-box;
+    transition: border-color .12s ease;
+}
+.sg-cat-tile:hover::after,
+.sg-cat-tile:focus-visible::after {
+    border-color: var(--brand-experiment, #5865f2);
+}
 .sg-cat-preview {
     position: absolute;
     inset: 0;
@@ -753,6 +768,10 @@ function isVideo(url?: string) {
     return !!url && /\.(mp4|webm)(\?|$)/i.test(url);
 }
 
+function looksLikeImage(url?: string) {
+    return !!url && /\.(gif|webp|png|jpe?g|avif)([?#]|$)/i.test(url);
+}
+
 /** Discord proxies media: .../external/<sig>/https/host/path -> https://host/path */
 function decodeProxy(url: string) {
     const m = /\/external\/[^/]+\/(https?)\/([^?#]+)(\?.*)?$/.exec(url);
@@ -776,6 +795,40 @@ async function loadCategories() {
     for (const c of categories) {
         if (!Array.isArray(c.gifs)) c.gifs = [];
     }
+
+    migrateMediaUrls();
+}
+
+/** Discord's media proxy links expire — keep the original URLs instead */
+function migrateMediaUrls() {
+    let changed = false;
+
+    for (const cat of categories) {
+        for (const gif of cat.gifs) {
+            if (gif.src && gif.src.includes("/external/")) {
+                const decoded = decodeProxy(gif.src);
+                if (decoded && decoded !== gif.src) {
+                    gif.src = decoded;
+                    changed = true;
+                }
+            }
+
+            if (gif.gifSrc && gif.gifSrc.includes("/external/")) {
+                const decoded = decodeProxy(gif.gifSrc);
+                if (decoded && decoded !== gif.gifSrc) {
+                    gif.gifSrc = decoded;
+                    changed = true;
+                }
+            }
+
+            if (!gif.src && gif.url && !isVideo(gif.url) && looksLikeImage(gif.url)) {
+                gif.src = gif.url;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) saveCategories();
 }
 
 function saveCategories() {
@@ -1040,7 +1093,11 @@ function closeOverlay() {
 }
 
 function mediaFor(gif: SavedGif) {
-    const src = gif.src || gif.url;
+    const src = gif.src || gif.url || "";
+
+    const imageFallbacks = [gif.gifSrc, gif.url, decodeProxy(gif.url || ""), decodeProxy(src)]
+        .filter((u): u is string => !!u && u !== src && !isVideo(u) && looksLikeImage(u));
+
     if (isVideo(src)) {
         const v = document.createElement("video");
         v.src = src;
@@ -1048,16 +1105,25 @@ function mediaFor(gif: SavedGif) {
         v.loop = true;
         v.muted = true;
         v.playsInline = true;
+        v.addEventListener("error", () => {
+            if (imageFallbacks.length) v.replaceWith(imageWithFallbacks(imageFallbacks[0], imageFallbacks.slice(1)));
+        }, { once: true });
         return v;
     }
 
+    return imageWithFallbacks(src, imageFallbacks);
+}
+
+function imageWithFallbacks(src: string, fallbacks: string[]) {
     const img = document.createElement("img");
     img.loading = "lazy";
     img.src = src;
+
+    let index = 0;
     img.addEventListener("error", () => {
-        if (gif.gifSrc && img.src !== gif.gifSrc) img.src = gif.gifSrc;
-        else if (gif.url && img.src !== gif.url) img.src = gif.url;
+        if (index < fallbacks.length) img.src = fallbacks[index++];
     });
+
     return img;
 }
 
@@ -1208,8 +1274,8 @@ function gifFromFiber(element: Element): SavedGif | null {
             && (typeof item.src === "string" || typeof item.gif_src === "string" || typeof item.gifSrc === "string")) {
             return {
                 id: typeof item.id === "string" ? item.id : `g${Date.now().toString(36)}`,
-                src: item.src || item.gif_src || item.gifSrc,
-                gifSrc: item.gif_src || item.gifSrc,
+                src: decodeProxy(item.src || item.gif_src || item.gifSrc),
+                gifSrc: item.gif_src || item.gifSrc ? decodeProxy(item.gif_src || item.gifSrc) : undefined,
                 url: item.url,
                 width: item.width || 0,
                 height: item.height || 0
@@ -1220,7 +1286,7 @@ function gifFromFiber(element: Element): SavedGif | null {
         if (typeof props.href === "string" && typeof props.video?.url === "string") {
             return {
                 id: `g${Date.now().toString(36)}`,
-                src: props.video.url,
+                src: decodeProxy(props.video.url),
                 url: props.href,
                 width: props.width || 0,
                 height: props.height || 0
@@ -1266,8 +1332,8 @@ function gifFromTile(tile: Element): SavedGif | null {
     if (found) {
         return {
             id: found.id,
-            src: found.src || found.gifSrc || src,
-            gifSrc: found.gifSrc,
+            src: decodeProxy(found.src || found.gifSrc || src),
+            gifSrc: found.gifSrc ? decodeProxy(found.gifSrc) : undefined,
             url: decodeProxy(found.url || found.src || src),
             width: found.width || width || 0,
             height: found.height || height || 0
@@ -1280,7 +1346,7 @@ function gifFromTile(tile: Element): SavedGif | null {
         height = Math.round(rect.height);
     }
 
-    return { id: `g${Date.now().toString(36)}`, src, url: decodeProxy(src), width, height };
+    return { id: `g${Date.now().toString(36)}`, src: decodeProxy(src), url: decodeProxy(src), width, height };
 }
 
 function swallow(e: Event) {
@@ -1348,7 +1414,7 @@ function gifFromMessageBox(box: HTMLElement, preferredMedia?: HTMLElement | null
 
     return {
         id: `g${Date.now().toString(36)}`,
-        src,
+        src: decodeProxy(src),
         url: decodeProxy(src),
         width,
         height
@@ -1876,18 +1942,24 @@ function makeCategoryTile(cat: SuperCategory, width: number, height: number) {
 
     const preview = cat.gifs[0];
     if (preview) {
-        const media = preview.gifSrc || preview.src || preview.url;
-        if (media && isVideo(media)) {
+        const imageUrl = [preview.gifSrc, preview.src, preview.url, decodeProxy(preview.src || "")]
+            .find(u => u && looksLikeImage(u));
+
+        const videoUrl = [preview.src, preview.gifSrc, preview.url]
+            .find(u => u && isVideo(u));
+
+        if (imageUrl) {
+            tile.style.backgroundImage = `url("${imageUrl}")`;
+        } else if (videoUrl) {
             const video = document.createElement("video");
             video.className = "sg-cat-preview";
-            video.src = media;
+            video.src = videoUrl;
             video.muted = true;
             video.loop = true;
             video.autoplay = true;
             video.playsInline = true;
+            video.addEventListener("error", () => video.remove(), { once: true });
             tile.appendChild(video);
-        } else if (media) {
-            tile.style.backgroundImage = `url("${media}")`;
         }
     }
 
