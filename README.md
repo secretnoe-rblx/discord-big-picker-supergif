@@ -61,7 +61,7 @@ It takes about **3–5 minutes**. When you see **“Done!”**, you're all set.
 - Your own categories appear as **tiles right in the GIF grid**, next to Favorites.
   Standard categories (hello, lol, love … kiss, Trending GIFs) are hidden.
 - To create a category, use the **“+ New Category”** tile in the same grid.
-- **Double-click** a category to rename it. Click the **✕** in its top-left corner to
+- Click the **✎** button on a category to rename it. Click the **✕** in its top-left corner to
   delete it (with a Yes/No confirmation).
 - Click a category to open it; the **back arrow** returns to the grid.
 - To save a GIF or image, click the **+** button:

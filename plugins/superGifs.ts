@@ -288,6 +288,29 @@ const CSS = `
     transition: opacity .12s ease, background-color .12s ease;
 }
 .sg-cat-del:hover { opacity: 1; background: var(--status-danger, #da373c); }
+.sg-cat-edit {
+    position: absolute;
+    top: 6px;
+    right: 34px;
+    z-index: 2;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0,0,0,.55);
+    color: #fff;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: .65;
+    transition: opacity .12s ease, background-color .12s ease;
+}
+.sg-cat-edit:hover { opacity: 1; background: var(--brand-experiment, #5865f2); }
+.sg-x.sg-edit:hover { background: var(--brand-experiment, #5865f2); color: #fff; }
 .sg-cat-confirm {
     flex-direction: column;
     gap: 6px;
@@ -647,7 +670,7 @@ function renderPopup() {
         }
 
         const row = el("div", "sg-row");
-        row.title = `${cat.name}  (double-click to rename)`;
+        row.title = `${cat.name}  (✎ to rename)`;
 
         const name = el("span", "sg-row-name", cat.id === FAV_ID ? `★ ${cat.name}` : cat.name);
         const count = el("span", "sg-count", String(cat.gifs.length));
@@ -658,7 +681,9 @@ function renderPopup() {
             openOverlay(cat.id);
         });
 
-        row.addEventListener("dblclick", e => {
+        const edit = el("button", "sg-x sg-edit", "✎") as HTMLButtonElement;
+        edit.title = `Rename “${cat.name}”`;
+        edit.addEventListener("click", e => {
             e.stopPropagation();
             renameCatId = cat.id;
             renderPopup();
@@ -678,6 +703,7 @@ function renderPopup() {
             sure.append(text, yes, no);
             row.replaceWith(sure);
         });
+        row.appendChild(edit);
         row.appendChild(del);
 
         popup.appendChild(row);
@@ -1614,6 +1640,20 @@ function makeCategoryTile(cat: SuperCategory, width: number, height: number) {
     });
     tile.appendChild(del);
 
+    const edit = el("button", "sg-cat-edit sg-ui", "✎") as HTMLButtonElement;
+    edit.type = "button";
+    edit.title = `Rename “${cat.name}”`;
+    edit.addEventListener("pointerdown", e => e.stopPropagation());
+    edit.addEventListener("click", e => {
+        e.preventDefault();
+        e.stopPropagation();
+        startTileEdit(tile, cat.name, "Category name", value => {
+            if (value.trim()) renameCategory(cat.id, value);
+            else renderCustomTiles(true);
+        });
+    });
+    tile.appendChild(edit);
+
     tile.addEventListener("click", e => {
         if (tile.querySelector(".sg-cat-input") || tile.classList.contains("sg-cat-confirm")) return;
         e.preventDefault();
@@ -1634,16 +1674,6 @@ function makeCategoryTile(cat: SuperCategory, width: number, height: number) {
         e.preventDefault();
         closePopup();
         openOverlay(cat.id);
-    });
-
-    tile.addEventListener("dblclick", e => {
-        if (tile.querySelector(".sg-cat-input") || tile.classList.contains("sg-cat-confirm")) return;
-        e.preventDefault();
-        e.stopPropagation();
-        startTileEdit(tile, cat.name, "Category name", value => {
-            if (value.trim()) renameCategory(cat.id, value);
-            else renderCustomTiles(true);
-        });
     });
 
     return tile;
