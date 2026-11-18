@@ -1157,6 +1157,7 @@ let floatingBtn: HTMLDivElement | null = null;
 let hoverBox: HTMLElement | null = null;
 let hoverMedia: HTMLElement | null = null;
 let hoverRaf = false;
+let alignTimer: ReturnType<typeof setTimeout> | null = null;
 
 function ensureFloatingBtn() {
     if (floatingBtn) return floatingBtn;
@@ -1194,24 +1195,82 @@ function ensureFloatingBtn() {
 function hideFloatingBtn() {
     hoverBox = null;
     hoverMedia = null;
+    if (alignTimer) {
+        clearTimeout(alignTimer);
+        alignTimer = null;
+    }
     if (floatingBtn) floatingBtn.style.display = "none";
 }
 
-function showFloatingBtn(box: HTMLElement, media: HTMLElement) {
-    const rect = media.getBoundingClientRect();
+/** Discord's Download button + its 32x32 button group (if visible) */
+function findDownloadGroup(box: HTMLElement, mediaRect: DOMRect): HTMLElement | null {
+    let scope: HTMLElement | null = box;
 
-    if (rect.width < 80 || rect.height < 80) return;
+    for (let i = 0; i < 6 && scope; i++, scope = scope.parentElement) {
+        const downloads = scope.querySelectorAll<HTMLElement>('a[aria-label="Download" i], [aria-label="Download" i]');
+
+        for (const download of downloads) {
+            const rect = download.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) continue;
+            if (rect.top < mediaRect.top - 8 || rect.top > mediaRect.bottom + 8) continue;
+
+            const parent = download.parentElement;
+            const parentRect = parent?.getBoundingClientRect();
+
+            if (parent && parentRect && parentRect.width > 0 && parentRect.width <= 64 && parentRect.height <= 64) {
+                return parent;
+            }
+
+            return download;
+        }
+    }
+
+    return null;
+}
+
+function showFloatingBtn(box: HTMLElement, media: HTMLElement, retry = 0) {
+    const mediaRect = media.getBoundingClientRect();
+
+    if (mediaRect.width < 80 || mediaRect.height < 80) return;
+
+    if (alignTimer) {
+        clearTimeout(alignTimer);
+        alignTimer = null;
+    }
+
+    const downloadGroup = findDownloadGroup(box, mediaRect);
+
+    let width = 32;
+    let height = 32;
+    let left = mediaRect.right - 38;
+    let top = mediaRect.top + 6;
+
+    if (downloadGroup) {
+        const groupRect = downloadGroup.getBoundingClientRect();
+
+        if (groupRect.width > 0 && groupRect.height > 0) {
+            width = Math.round(groupRect.width);
+            height = Math.round(groupRect.height);
+            top = Math.round(groupRect.top);
+            left = Math.round(groupRect.left - width - 4);
+        }
+    } else if (retry < 4) {
+        // The button appears slightly after hover; try to align a few times
+        alignTimer = setTimeout(() => {
+            alignTimer = null;
+            if (hoverBox === box && hoverMedia === media) showFloatingBtn(box, media, retry + 1);
+        }, 150);
+    }
 
     const btn = ensureFloatingBtn();
     hoverBox = box;
     hoverMedia = media;
 
-    const left = Math.min(Math.max(8, rect.right - 38), window.innerWidth - 40);
-    const top = Math.max(8, rect.top + 6);
-
+    btn.style.width = `${width}px`;
+    btn.style.height = `${height}px`;
+    btn.style.left = `${Math.min(Math.max(8, left), window.innerWidth - width - 8)}px`;
+    btn.style.top = `${Math.max(8, top)}px`;
     btn.style.display = "flex";
-    btn.style.left = `${Math.round(left)}px`;
-    btn.style.top = `${Math.round(top)}px`;
 }
 
 function findMediaBoxAt(x: number, y: number): { box: HTMLElement; media: HTMLElement; } | null {
