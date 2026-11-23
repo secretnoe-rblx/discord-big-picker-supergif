@@ -432,12 +432,24 @@ function normalize(u?: string) {
     return (u || "").split("?")[0].toLowerCase();
 }
 
+function pathnameOf(url?: string) {
+    if (!url) return "";
+    try {
+        return new URL(url).pathname.toLowerCase();
+    } catch {
+        return url.split(/[?#]/)[0].toLowerCase();
+    }
+}
+
 function isVideo(url?: string) {
-    return !!url && /\.(mp4|webm)(\?|$)/i.test(url);
+    return /\.(mp4|webm)$/i.test(pathnameOf(url));
 }
 
 function looksLikeImage(url?: string) {
-    return !!url && /\.(gif|webp|png|jpe?g|avif)([?#]|$)/i.test(url);
+    if (/\.(gif|webp|png|jpe?g|avif)$/i.test(pathnameOf(url))) return true;
+
+    // Some CDNs only expose the format in the query string
+    return !!url && /[?&]format=(gif|webp|png|jpe?g|avif)(?:&|$)/i.test(url);
 }
 
 /** Discord proxies media: .../external/<sig>/https/host/path -> https://host/path */
@@ -470,28 +482,12 @@ async function loadCategories() {
     refreshExpiredMedia().catch(() => { });
 }
 
-/** Discord's media proxy links expire — keep the original URLs instead */
+/** Fill missing preview sources from the saved link */
 function migrateMediaUrls() {
     let changed = false;
 
     for (const cat of categories) {
         for (const gif of cat.gifs) {
-            if (gif.src && gif.src.includes("/external/")) {
-                const decoded = decodeProxy(gif.src);
-                if (decoded && decoded !== gif.src) {
-                    gif.src = decoded;
-                    changed = true;
-                }
-            }
-
-            if (gif.gifSrc && gif.gifSrc.includes("/external/")) {
-                const decoded = decodeProxy(gif.gifSrc);
-                if (decoded && decoded !== gif.gifSrc) {
-                    gif.gifSrc = decoded;
-                    changed = true;
-                }
-            }
-
             if (!gif.src && gif.url && !isVideo(gif.url) && looksLikeImage(gif.url)) {
                 gif.src = gif.url;
                 changed = true;
@@ -1112,8 +1108,8 @@ function gifFromFiber(element: Element): SavedGif | null {
             && (typeof item.src === "string" || typeof item.gif_src === "string" || typeof item.gifSrc === "string")) {
             return {
                 id: typeof item.id === "string" ? item.id : `g${Date.now().toString(36)}`,
-                src: decodeProxy(item.src || item.gif_src || item.gifSrc),
-                gifSrc: item.gif_src || item.gifSrc ? decodeProxy(item.gif_src || item.gifSrc) : undefined,
+                src: item.src || item.gif_src || item.gifSrc,
+                gifSrc: item.gif_src || item.gifSrc,
                 url: item.url,
                 width: item.width || 0,
                 height: item.height || 0
@@ -1124,7 +1120,7 @@ function gifFromFiber(element: Element): SavedGif | null {
         if (typeof props.href === "string" && typeof props.video?.url === "string") {
             return {
                 id: `g${Date.now().toString(36)}`,
-                src: decodeProxy(props.video.url),
+                src: props.video.url,
                 url: props.href,
                 width: props.width || 0,
                 height: props.height || 0
@@ -1170,8 +1166,8 @@ function gifFromTile(tile: Element): SavedGif | null {
     if (found) {
         return {
             id: found.id,
-            src: decodeProxy(found.src || found.gifSrc || src),
-            gifSrc: found.gifSrc ? decodeProxy(found.gifSrc) : undefined,
+            src: found.src || found.gifSrc || src,
+            gifSrc: found.gifSrc,
             url: decodeProxy(found.url || found.src || src),
             width: found.width || width || 0,
             height: found.height || height || 0
@@ -1184,7 +1180,7 @@ function gifFromTile(tile: Element): SavedGif | null {
         height = Math.round(rect.height);
     }
 
-    return { id: `g${Date.now().toString(36)}`, src: decodeProxy(src), url: decodeProxy(src), width, height };
+    return { id: `g${Date.now().toString(36)}`, src, url: decodeProxy(src), width, height };
 }
 
 function swallow(e: Event) {
@@ -1254,7 +1250,7 @@ function gifFromMessageBox(box: HTMLElement, preferredMedia?: HTMLElement | null
 
     return {
         id: `g${Date.now().toString(36)}`,
-        src: decodeProxy(src),
+        src,
         url: decodeProxy(src),
         width,
         height

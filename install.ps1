@@ -165,6 +165,10 @@ if (-not (Test-Path $superGifsSource)) {
 $superGifsDir = Join-Path $InstallDir "src\userplugins\superGifs"
 New-Item -ItemType Directory -Force $superGifsDir | Out-Null
 Copy-Item $superGifsSource (Join-Path $superGifsDir "index.ts") -Force
+$superGifsNativeSource = Join-Path $PSScriptRoot "plugins\superGifs.native.ts"
+if (Test-Path $superGifsNativeSource) {
+    Copy-Item $superGifsNativeSource (Join-Path $superGifsDir "native.ts") -Force
+}
 Ok "SuperGifs installed"
 
 $env:COREPACK_ENABLE_DOWNLOAD_PROMPT = "0"
