@@ -8,7 +8,7 @@ import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import { insertTextIntoChatInputBox, sendMessage } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
-import { ExpressionPickerStore, FluxDispatcher, GIFPickerViewStore, MessageActions, PendingReplyStore, SelectedChannelStore, showToast } from "@webpack/common";
+import { ExpressionPickerStore, FluxDispatcher, GIFPickerViewStore, MessageActions, PendingReplyStore, RestAPI, SelectedChannelStore, showToast } from "@webpack/common";
 
 const STORE_KEY = "superGifs_categories_v1";
 const STYLE_ID = "supergifs-style";
@@ -169,6 +169,13 @@ const CSS = `
 }
 .sg-tile img, .sg-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sg-tile:hover { outline: 2px solid var(--brand-experiment, #5865f2); outline-offset: -2px; }
+.sg-media-missing {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--background-secondary-alt, #232428);
+    color: var(--text-muted, #b5bac1);
+    font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+}
 .sg-del {
     position: absolute; top: 4px; left: 4px; width: 22px; height: 22px;
     display: none; align-items: center; justify-content: center;
@@ -406,6 +413,7 @@ let observer: MutationObserver | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let drawerObserver: MutationObserver | null = null;
 let ensureTimer: ReturnType<typeof setInterval> | null = null;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let drawerOpenedAt = 0;
 let maskedGrid: HTMLElement | null = null;
 let maskTimer: ReturnType<typeof setTimeout> | null = null;
@@ -434,7 +442,9 @@ function looksLikeImage(url?: string) {
 
 /** Discord proxies media: .../external/<sig>/https/host/path -> https://host/path */
 function decodeProxy(url: string) {
-    const m = /\/external\/[^/]+\/(https?)\/([^?#]+)(\?.*)?$/.exec(url);
+    // The original URL can also be preceded by encoded query parameters,
+    // so match the last /http(s)/ segment, not necessarily the first one.
+    const m = /\/external\/[^/]+\/(?:.*\/)?(https?)\/([^?#]+)(\?.*)?$/i.exec(url);
     return m ? `${m[1]}://${m[2]}${m[3] ?? ""}` : url;
 }
 
@@ -457,6 +467,7 @@ async function loadCategories() {
     }
 
     migrateMediaUrls();
+    refreshExpiredMedia().catch(() => { });
 }
 
 /** Discord's media proxy links expire — keep the original URLs instead */
@@ -493,6 +504,122 @@ function migrateMediaUrls() {
 
 function saveCategories() {
     DataStore.set(STORE_KEY, categories).catch(() => { });
+}
+
+/* ---------------------------------------------------------------- */
+/*  Refreshing expired Discord attachment links                    */
+/* ---------------------------------------------------------------- */
+
+const DISCORD_ATTACHMENT_RE = /^https?:\/\/(?:cdn\.discordapp\.(?:com|net)|media\.discordapp\.(?:com|net))\/attachments\//i;
+
+function isDiscordAttachment(url?: string) {
+    return !!url && DISCORD_ATTACHMENT_RE.test(url);
+}
+
+/** Discord CDN attachments carry an `ex` expiry (hex unix seconds) */
+function isExpiredDiscordUrl(url?: string) {
+    if (!isDiscordAttachment(url)) return false;
+
+    const match = /[?&]ex=([0-9a-f]+)/i.exec(url!);
+    if (!match) return true;
+
+    return parseInt(match[1], 16) * 1000 <= Date.now() + 60_000;
+}
+
+function gifNeedsRefresh(gif: SavedGif) {
+    return [gif.src, gif.gifSrc, gif.url].some(isExpiredDiscordUrl);
+}
+
+let mediaRefresh: Promise<void> | null = null;
+
+/**
+ * Discord attachment links expire after ~24 hours. Ask Discord for fresh
+ * signatures and write them back so previews (and sending) keep working.
+ */
+function refreshExpiredMedia() {
+    if (!mediaRefresh) {
+        mediaRefresh = doRefreshExpiredMedia()
+            .catch(() => { })
+            .finally(() => { mediaRefresh = null; });
+    }
+
+    return mediaRefresh;
+}
+
+async function doRefreshExpiredMedia() {
+    const urls = new Set<string>();
+
+    for (const cat of categories) {
+        for (const gif of cat.gifs) {
+            for (const url of [gif.src, gif.gifSrc, gif.url]) {
+                if (isExpiredDiscordUrl(url)) urls.add(url!);
+            }
+        }
+    }
+
+    if (!urls.size) return;
+
+    const requested = [...urls];
+    const res = await RestAPI.post({
+        url: "/attachments/refresh-urls",
+        body: { attachment_urls: requested }
+    }) as { body?: { refreshed_urls?: any; }; };
+
+    const list = res.body?.refreshed_urls;
+    const exact = new Map<string, string>();
+    const byPath = new Map<string, string>();
+
+    const remember = (original?: string, refreshed?: string) => {
+        if (!original || !refreshed) return;
+        exact.set(original, refreshed);
+        byPath.set(normalize(original), refreshed);
+    };
+
+    if (Array.isArray(list)) {
+        list.forEach((item: any, index: number) => {
+            if (typeof item === "string") remember(requested[index], item);
+            else if (item && typeof item.refreshed === "string") {
+                remember(typeof item.original === "string" ? item.original : requested[index], item.refreshed);
+            }
+        });
+    } else if (list && typeof list === "object") {
+        for (const [original, refreshed] of Object.entries(list)) {
+            if (typeof refreshed === "string") remember(original, refreshed);
+        }
+    }
+
+    if (!exact.size) return;
+
+    let changed = false;
+
+    for (const cat of categories) {
+        for (const gif of cat.gifs) {
+            for (const field of ["src", "gifSrc", "url"] as const) {
+                const current = gif[field];
+                if (!isDiscordAttachment(current)) continue;
+
+                const fresh = exact.get(current!) ?? byPath.get(normalize(current));
+                if (fresh && fresh !== current) {
+                    gif[field] = fresh;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    if (!changed) return;
+
+    saveCategories();
+
+    try {
+        renderCustomTiles(true);
+    } catch { }
+
+    if (openCatId) {
+        try {
+            renderOverlay();
+        } catch { }
+    }
 }
 
 function findDrawer() {
@@ -747,6 +874,7 @@ function openOverlay(catId: string) {
     overlay.style.display = "flex";
     updatePosition();
     renderOverlay();
+    refreshExpiredMedia().catch(() => { });
 }
 
 function closeOverlay() {
@@ -755,8 +883,14 @@ function closeOverlay() {
     if (overlay) overlay.style.display = "none";
 }
 
+function missingMedia() {
+    return el("div", "sg-media-missing", "GIF");
+}
+
 function mediaFor(gif: SavedGif) {
     const src = gif.src || gif.url || "";
+
+    if (!src) return missingMedia();
 
     const imageFallbacks = [gif.gifSrc, gif.url, decodeProxy(gif.url || ""), decodeProxy(src)]
         .filter((u): u is string => !!u && u !== src && !isVideo(u) && looksLikeImage(u));
@@ -769,7 +903,12 @@ function mediaFor(gif: SavedGif) {
         v.muted = true;
         v.playsInline = true;
         v.addEventListener("error", () => {
-            if (imageFallbacks.length) v.replaceWith(imageWithFallbacks(imageFallbacks[0], imageFallbacks.slice(1)));
+            if (imageFallbacks.length) {
+                v.replaceWith(imageWithFallbacks(imageFallbacks[0], imageFallbacks.slice(1)));
+            } else {
+                v.replaceWith(missingMedia());
+                refreshExpiredMedia().catch(() => { });
+            }
         }, { once: true });
         return v;
     }
@@ -784,7 +923,13 @@ function imageWithFallbacks(src: string, fallbacks: string[]) {
 
     let index = 0;
     img.addEventListener("error", () => {
-        if (index < fallbacks.length) img.src = fallbacks[index++];
+        if (index < fallbacks.length) {
+            img.src = fallbacks[index++];
+            return;
+        }
+
+        img.replaceWith(missingMedia());
+        refreshExpiredMedia().catch(() => { });
     });
 
     return img;
@@ -830,7 +975,11 @@ function renderOverlay() {
             });
             tile.appendChild(del);
 
-            tile.addEventListener("click", e => {
+            tile.addEventListener("click", async e => {
+                if (gifNeedsRefresh(gif)) {
+                    await refreshExpiredMedia().catch(() => { });
+                }
+
                 const url = sendUrlFor(gif);
                 if (!url) return;
 
@@ -2178,6 +2327,10 @@ export default definePlugin({
                 clampDrawerHeight();
             } catch { }
         }, 1000);
+
+        refreshTimer = setInterval(() => {
+            refreshExpiredMedia().catch(() => { });
+        }, 10 * 60_000);
     },
 
     stop() {
@@ -2192,6 +2345,11 @@ export default definePlugin({
         if (ensureTimer) {
             clearInterval(ensureTimer);
             ensureTimer = null;
+        }
+
+        if (refreshTimer) {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
         }
 
         document.removeEventListener("pointerdown", onDocumentPointerDown, true);
