@@ -560,12 +560,6 @@ async function doRefreshExpiredMedia() {
     if (!urls.size) return;
 
     const requested = [...urls];
-    const res = await RestAPI.post({
-        url: "/attachments/refresh-urls",
-        body: { attachment_urls: requested }
-    }) as { body?: { refreshed_urls?: any; }; };
-
-    const list = res.body?.refreshed_urls;
     const exact = new Map<string, string>();
     const byPath = new Map<string, string>();
 
@@ -575,16 +569,48 @@ async function doRefreshExpiredMedia() {
         byPath.set(normalize(original), refreshed);
     };
 
-    if (Array.isArray(list)) {
-        list.forEach((item: any, index: number) => {
-            if (typeof item === "string") remember(requested[index], item);
-            else if (item && typeof item.refreshed === "string") {
-                remember(typeof item.original === "string" ? item.original : requested[index], item.refreshed);
+    const rememberResponse = (list: any, batch: string[]) => {
+        if (Array.isArray(list)) {
+            list.forEach((item: any, index: number) => {
+                if (typeof item === "string") remember(batch[index], item);
+                else if (item && typeof item.refreshed === "string") {
+                    remember(typeof item.original === "string" ? item.original : batch[index], item.refreshed);
+                }
+            });
+        } else if (list && typeof list === "object") {
+            for (const [original, refreshed] of Object.entries(list)) {
+                if (typeof refreshed === "string") remember(original, refreshed);
             }
-        });
-    } else if (list && typeof list === "object") {
-        for (const [original, refreshed] of Object.entries(list)) {
-            if (typeof refreshed === "string") remember(original, refreshed);
+        }
+    };
+
+    const refreshBatch = async (batch: string[]) => {
+        const res = await RestAPI.post({
+            url: "/attachments/refresh-urls",
+            body: { attachment_urls: batch }
+        }) as { body?: { refreshed_urls?: any; }; };
+
+        rememberResponse(res.body?.refreshed_urls, batch);
+    };
+
+    // The endpoint rejects more than 50 URLs per request.
+    const MAX_PER_REQUEST = 50;
+
+    for (let i = 0; i < requested.length; i += MAX_PER_REQUEST) {
+        const batch = requested.slice(i, i + MAX_PER_REQUEST);
+
+        try {
+            await refreshBatch(batch);
+        } catch (error: any) {
+            // A single bad URL invalidates the whole batch. Retry this batch
+            // one by one, but don't hammer the endpoint on rate limits.
+            if (error?.status !== 400) continue;
+
+            for (const url of batch) {
+                try {
+                    await refreshBatch([url]);
+                } catch { }
+            }
         }
     }
 
